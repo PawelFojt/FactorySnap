@@ -1,0 +1,10 @@
+<Solution>
+  <Project Path="FactorySnap.Agent/FactorySnap.Agent.csproj" />
+  <Project Path="FactorySnap.AnomalyDetector/FactorySnap.AnomalyDetector.csproj" />
+  <Project Path="FactorySnap.Api/FactorySnap.Api.csproj" />
+  <Project Path="FactorySnap.AppHost/FactorySnap.AppHost.csproj" />
+  <Project Path="FactorySnap.Client/FactorySnap.Client.csproj" />
+  <Project Path="FactorySnap.ServiceDefaults/FactorySnap.ServiceDefaults.csproj" />
+  <Project Path="FactorySnap.Shared/FactorySnap.Shared.csproj" />
+  <Project Path="FactorySnap.Tests/FactorySnap.Tests.csproj" />
+</Solution>

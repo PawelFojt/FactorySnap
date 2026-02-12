@@ -1,0 +1,123 @@
+@page "/opc-config"
+@using FactorySnap.Shared.Contracts
+@inject HttpClient Http
+
+<PageTitle>Konfiguracja OPC</PageTitle>
+
+<div class="container-fluid mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1>⚙️ Konfiguracja OPC</h1>
+        <button class="btn btn-primary" @onclick="SaveAsync" disabled="@_isSaving">Zapisz</button>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_statusMessage))
+    {
+        <div class="alert alert-success">
+            @_statusMessage
+        </div>
+    }
+
+    <div class="card mb-4">
+        <div class="card-body">
+            <label class="form-label">Adres OPC UA</label>
+            <input class="form-control" @bind="_model.Url" placeholder="opc.tcp://host:port/Server" />
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header d-flex justify-content-between">
+            <strong>Nody do monitorowania</strong>
+            <button class="btn btn-sm btn-outline-success" @onclick="AddNode">+ Dodaj</button>
+        </div>
+        <div class="card-body">
+            @if (_model.Nodes.Count == 0)
+            {
+                <div class="text-muted">Brak nodów. Dodaj pierwszy.</div>
+            }
+            else
+            {
+                <table class="table table-striped">
+                    <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>NodeId</th>
+                        <th>TagName</th>
+                        <th>Aktywny</th>
+                        <th></th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var node in _model.Nodes)
+                    {
+                        <tr @key="node">
+                            <td>@(_model.Nodes.IndexOf(node) + 1)</td>
+                            <td>
+                                <input class="form-control"
+                                       placeholder="ns=2;s=Motor1.Temperature"
+                                       @bind-value="node.NodeId"
+                                       @bind-value:event="oninput" />
+                            </td>
+                            <td>
+                                <input class="form-control"
+                                       placeholder="Temperatura silnika"
+                                       @bind-value="node.TagName"
+                                       @bind-value:event="oninput" />
+                            </td>
+                            <td class="text-center">
+                                <input type="checkbox" class="form-check-input" @bind="node.IsEnabled" />
+                            </td>
+                            <td class="text-end">
+                                <button class="btn btn-sm btn-outline-danger" @onclick="() => RemoveNode(node)">Usuń</button>
+                            </td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    private OpcConfigDto _model = new();
+    private bool _isSaving;
+    private string? _statusMessage;
+    
+    protected override async Task OnInitializedAsync()
+    {
+        var data = await Http.GetFromJsonAsync<OpcConfigDto>("/api/opc/config");
+        if (data is not null)
+        {
+            _model = data;
+        }
+    }
+
+    private void AddNode()
+    {
+        var sort = _model.Nodes.Count == 0 ? 1 : _model.Nodes.Max(n => n.SortOrder) + 1;
+        _model.Nodes.Add(new OpcNodeDto()
+        {
+            Id = 0,
+            NodeId = string.Empty,
+            TagName = string.Empty,
+            IsEnabled = true,
+            SortOrder = sort
+        });
+    }
+    
+    private void RemoveNode(OpcNodeDto node)
+    {
+        _model.Nodes.Remove(node);
+    }
+
+    private async Task SaveAsync()
+    {
+        _isSaving = true;
+        _statusMessage = null;
+
+        await Http.PutAsJsonAsync("/api/opc/config", _model);
+
+        _statusMessage = "Zapisano poprawnie. Aby agent zaczął monitorować nowe nody, zrestartuj aplikację.";
+        _isSaving = false;
+    }
+}

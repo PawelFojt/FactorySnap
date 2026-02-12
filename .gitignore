@@ -367,3 +367,6 @@ FodyWeavers.xsd
 # Ignore appsettings
 appsettings.json
 appsettings.*.json
+
+# Ignore wwwroot libs
+**/wwwroot/lib/

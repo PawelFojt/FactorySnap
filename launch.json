@@ -1,0 +1,25 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Start FactorySnap (Aspire)",
+            "type": "coreclr",
+            "request": "launch",
+            "preLaunchTask": "build",
+            "program": "${workspaceFolder}/FactorySnap.AppHost/bin/Debug/net10.0/FactorySnap.AppHost.dll",
+            "args": [],
+            "cwd": "${workspaceFolder}/FactorySnap.AppHost",
+            "stopAtEntry": false,
+            "serverReadyAction": {
+                "action": "openExternally",
+                "pattern": "\\bNow listening on:\\s+(https?://\\S+)"
+            },
+            "env": {
+                "ASPNETCORE_ENVIRONMENT": "Development",
+                "DOTNET_DASHBOARD_OTLP_ENDPOINT_URL": "http://localhost:18889",
+                "DOTNET_RESOURCE_SERVICE_ENDPOINT_URL": "http://localhost:20223"
+            },
+            "console": "internalConsole"
+        }
+    ]
+}

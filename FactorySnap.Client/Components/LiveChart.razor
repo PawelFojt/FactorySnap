@@ -1,0 +1,236 @@
+﻿@using Microsoft.AspNetCore.SignalR.Client
+@using System.Text.Json
+@inject HttpClient Http
+@implements IAsyncDisposable
+
+<div class="card shadow-sm h-100" style="overflow: hidden;">
+    <div class="card-body d-flex flex-column">
+
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <h5 class="card-title m-0 text-truncate">
+                @TagName <small class="text-muted" style="font-size: 0.7em;">(@MachineId)</small>
+            </h5>
+            <span class="badge bg-light text-dark border">
+                @_lastValue.ToString("F2")
+            </span>
+        </div>
+
+        <div class="mb-2">
+            <label class="form-label small text-muted">Okno: @_windowMinutes min</label>
+            <input type="range" class="form-range"
+                   min="1" max="60" step="1"
+                   @bind="_windowMinutes"
+                   @bind:event="oninput"
+                   @onchange="OnWindowChanged" />
+        </div>
+
+        <div style="flex-grow: 1; min-height: 250px; position: relative;">
+
+            <ApexChart TItem="TimeDataPoint"
+                       Title=""
+                       @ref="_chart"
+                       Options="_options"
+                       Height="@("100%")"
+                       Width="@("100%")">
+
+                <ApexPointSeries TItem="TimeDataPoint"
+                                 Items="_dataPoints"
+                                 Name="@TagName"
+                                 SeriesType="SeriesType.Area"
+                                 XValue="@(e => e.Time)"
+                                 YValue="@(e => (decimal)e.Value)"
+                                 Stroke="@(new SeriesStroke { Width = 2, Color = "#0d6efd" })"/>
+            </ApexChart>
+        </div>
+    </div>
+    @if (!string.IsNullOrWhiteSpace(_errorMessage))
+    {
+        <div class="alert alert-warning small mb-2">
+            @_errorMessage
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public string? MachineId { get; set; }
+    [Parameter] public string? TagName { get; set; }
+
+    private HubConnection? _hubConnection;
+    private ApexChart<TimeDataPoint>? _chart;
+    private List<TimeDataPoint> _dataPoints = [];
+    private readonly ApexChartOptions<TimeDataPoint> _options = new();
+    private bool _isDisposed;
+    private double _lastValue;
+    private readonly JsonSerializerOptions _jsonOptions = new() { PropertyNameCaseInsensitive = true };
+    private int _windowMinutes = 5;
+    private TimeSpan Window => TimeSpan.FromMinutes(_windowMinutes);
+    private string? _errorMessage;
+    
+    public class TimeDataPoint
+    {
+        public long Time { get; init; }
+        public double Value { get; init; }
+    }
+
+    protected override void OnInitialized()
+    {
+        _options.Chart = new Chart
+        {
+            Animations = new Animations { Enabled = false },
+            Toolbar = new Toolbar { Show = false },
+            Zoom = new Zoom { Enabled = false },
+            Background = "transparent"
+        };
+
+        _options.Xaxis = new XAxis
+        {
+            Type = XAxisType.Datetime,
+            Labels = new XAxisLabels
+            {
+                Format = "HH:mm:ss",
+                Style = new AxisLabelStyle { FontSize = "10px" }
+            },
+            Tooltip = new AxisTooltip { Enabled = false },
+            AxisBorder = new AxisBorder { Show = false },
+            AxisTicks = new AxisTicks { Show = false }
+        };
+
+        _options.Yaxis =
+        [
+            new YAxis
+            {
+                DecimalsInFloat = 2,
+                Labels = new YAxisLabels
+                {
+                    Style = new AxisLabelStyle { FontSize = "10px" }
+                }
+            }
+        ];
+
+        _options.Stroke = new Stroke { Curve = Curve.Smooth, Width = 2 };
+        _options.Fill = new Fill
+        {
+            Type = FillType.Gradient,
+            Gradient = new FillGradient
+            {
+                ShadeIntensity = 1,
+                OpacityFrom = 0.5,
+                OpacityTo = 0.05,
+                Stops = [0, 100]
+            }
+        };
+
+        _options.Grid = new Grid { Show = true, BorderColor = "#f1f1f1" };
+    }
+    
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await LoadHistoryData();
+            await ConnectToSignalR();
+        }
+    }
+
+    private async Task OnWindowChanged(ChangeEventArgs _)
+    {
+        _dataPoints.Clear();
+        await LoadHistoryData();
+        if (_chart != null) await _chart.UpdateSeriesAsync();
+        StateHasChanged();
+    }
+    
+    private async Task LoadHistoryData()
+    {
+        try
+        {
+            var to = DateTime.UtcNow;
+            var from = to.Subtract(Window);
+            var response = await Http.GetAsync($"api/history/{MachineId}/{TagName}?from={from:O}&to={to:O}");
+            if (!response.IsSuccessStatusCode) return;
+
+            var history = await response.Content.ReadFromJsonAsync<List<JsonElement>>();
+
+            if (history != null && history.Any())
+            {
+                foreach (var item in history)
+                {
+                    if (item.TryGetProperty("t", out var tProp) && item.TryGetProperty("v", out var vProp))
+                    {
+                        var time = tProp.GetDateTime().ToLocalTime();
+                        var unixTime = new DateTimeOffset(time).ToUnixTimeMilliseconds();
+                        _dataPoints.Add(new TimeDataPoint { Time = unixTime, Value = vProp.GetDouble() });
+                    }
+                }
+
+                _dataPoints = _dataPoints.OrderBy(x => x.Time).ToList();
+                _lastValue = _dataPoints.LastOrDefault()?.Value ?? 0;
+
+                if (_chart != null) await _chart.UpdateSeriesAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Błąd historii: {ex.Message}";
+        }
+    }
+
+    private async Task ConnectToSignalR()
+    {
+        var hubUrl = "https://localhost:7560/hubs/live";
+
+        _hubConnection = new HubConnectionBuilder()
+            .WithUrl(hubUrl)
+            .WithAutomaticReconnect()
+            .Build();
+
+        _hubConnection.On<string, string>("ReceiveMeasure", async (topic, json) =>
+        {
+            if (_isDisposed) return;
+
+            if (topic.EndsWith($"/{MachineId}/{TagName}", StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    var measure = JsonSerializer.Deserialize<Measurement>(json, _jsonOptions);
+                    if (measure?.ValNum != null)
+                    {
+                        var unixTime = new DateTimeOffset(measure.Timestamp.ToLocalTime()).ToUnixTimeMilliseconds();
+                        var val = measure.ValNum;
+
+                        await InvokeAsync(async () =>
+                        {
+                            if (_isDisposed) return;
+
+                            _dataPoints.Add(new TimeDataPoint { Time = unixTime, Value = val });
+                            _lastValue = val;
+
+                            var cutoff = DateTimeOffset.UtcNow.Subtract(Window).ToUnixTimeMilliseconds();
+                            _dataPoints.RemoveAll(p => p.Time < cutoff);
+
+                            if (_chart != null)
+                            {
+                                await _chart.UpdateSeriesAsync(false);
+                            }
+
+                            StateHasChanged();
+                        });
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _errorMessage = $"Błąd danych live: {ex.Message}";
+                }
+            }
+        });
+
+        await _hubConnection.StartAsync();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _isDisposed = true;
+        if (_hubConnection is not null) await _hubConnection.DisposeAsync();
+    }
+
+}

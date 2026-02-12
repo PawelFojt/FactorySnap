@@ -1,0 +1,54 @@
+﻿@page "/"
+@using FactorySnap.Shared.Contracts
+@inject HttpClient Http
+
+<PageTitle>FactorySnap Dashboard</PageTitle>
+
+@code {
+    private const string MachineId = "S7-1500";
+    private List<OpcNodeDto> _nodes = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var config = await Http.GetFromJsonAsync<OpcConfigDto>("/api/opc/config");
+        _nodes = config?.Nodes
+            .Where(n => n.IsEnabled)
+            .OrderBy(n => n.SortOrder)
+            .ToList() ?? new List<OpcNodeDto>();
+    }
+}
+
+<div class="container-fluid mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1>🏭 Factory Monitor</h1>
+        <span class="badge bg-success p-2">SYSTEM ONLINE</span>
+    </div>
+
+    <div class="row">
+        @if (_nodes.Count == 0)
+        {
+            <div class="col-12">
+                <div class="alert alert-warning">
+                    Brak aktywnych nodów do wyświetlenia. Dodaj je w OPC Config.
+                </div>
+            </div>
+        }
+        else
+        {
+            @foreach (var node in _nodes)
+            {
+                <div class="col-lg-6 col-md-12 mb-4">
+                    <LiveChart MachineId="@MachineId" TagName="@node.TagName" />
+                </div>
+            }
+        }
+    </div>
+    
+    <div class="row">
+        <div class="col-12">
+            <div class="alert alert-info">
+                <i class="bi bi-info-circle"></i> Dane są aktualizowane w czasie rzeczywistym przez SignalR i Redis.
+            </div>
+        </div>
+    </div>
+</div>
