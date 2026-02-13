@@ -19,8 +19,8 @@
             <label class="form-label small text-muted">Okno: @_windowMinutes min</label>
             <input type="range" class="form-range"
                    min="1" max="60" step="1"
-                   @bind="_windowMinutes"
-                   @bind:event="oninput"
+                   value="@_windowMinutes"
+                   @oninput="@(e => _windowMinutes = int.Parse(e.Value?.ToString() ?? "5"))"
                    @onchange="OnWindowChanged" />
         </div>
 
@@ -57,7 +57,7 @@
 
     private HubConnection? _hubConnection;
     private ApexChart<TimeDataPoint>? _chart;
-    private List<TimeDataPoint> _dataPoints = [];
+    private readonly List<TimeDataPoint> _dataPoints = new();
     private readonly ApexChartOptions<TimeDataPoint> _options = new();
     private bool _isDisposed;
     private double _lastValue;
@@ -65,11 +65,17 @@
     private int _windowMinutes = 5;
     private TimeSpan Window => TimeSpan.FromMinutes(_windowMinutes);
     private string? _errorMessage;
-    
+
     public class TimeDataPoint
     {
         public long Time { get; init; }
         public double Value { get; init; }
+    }
+
+    public class Measurement
+    {
+        public DateTime Timestamp { get; set; }
+        public double? ValNum { get; set; }
     }
 
     protected override void OnInitialized()
@@ -122,7 +128,7 @@
 
         _options.Grid = new Grid { Show = true, BorderColor = "#f1f1f1" };
     }
-    
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender)
@@ -132,14 +138,11 @@
         }
     }
 
-    private async Task OnWindowChanged(ChangeEventArgs _)
+    private async Task OnWindowChanged()
     {
-        _dataPoints.Clear();
         await LoadHistoryData();
-        if (_chart != null) await _chart.UpdateSeriesAsync();
-        StateHasChanged();
     }
-    
+
     private async Task LoadHistoryData()
     {
         try
@@ -147,12 +150,15 @@
             var to = DateTime.UtcNow;
             var from = to.Subtract(Window);
             var response = await Http.GetAsync($"api/history/{MachineId}/{TagName}?from={from:O}&to={to:O}");
+            
             if (!response.IsSuccessStatusCode) return;
 
             var history = await response.Content.ReadFromJsonAsync<List<JsonElement>>();
 
-            if (history != null && history.Any())
+            if (history != null)
             {
+                _dataPoints.Clear();
+                
                 foreach (var item in history)
                 {
                     if (item.TryGetProperty("t", out var tProp) && item.TryGetProperty("v", out var vProp))
@@ -163,10 +169,11 @@
                     }
                 }
 
-                _dataPoints = _dataPoints.OrderBy(x => x.Time).ToList();
+                _dataPoints.Sort((a, b) => a.Time.CompareTo(b.Time));
                 _lastValue = _dataPoints.LastOrDefault()?.Value ?? 0;
 
                 if (_chart != null) await _chart.UpdateSeriesAsync();
+                StateHasChanged();
             }
         }
         catch (Exception ex)
@@ -177,7 +184,7 @@
 
     private async Task ConnectToSignalR()
     {
-        var hubUrl = "https://localhost:7560/hubs/live";
+        const string hubUrl = "https://localhost:7560/hubs/live";
 
         _hubConnection = new HubConnectionBuilder()
             .WithUrl(hubUrl)
@@ -196,7 +203,7 @@
                     if (measure?.ValNum != null)
                     {
                         var unixTime = new DateTimeOffset(measure.Timestamp.ToLocalTime()).ToUnixTimeMilliseconds();
-                        var val = measure.ValNum;
+                        var val = measure.ValNum.Value;
 
                         await InvokeAsync(async () =>
                         {
@@ -206,11 +213,15 @@
                             _lastValue = val;
 
                             var cutoff = DateTimeOffset.UtcNow.Subtract(Window).ToUnixTimeMilliseconds();
-                            _dataPoints.RemoveAll(p => p.Time < cutoff);
+                            
+                            while (_dataPoints.Count > 0 && _dataPoints[0].Time < cutoff)
+                            {
+                                _dataPoints.RemoveAt(0);
+                            }
 
                             if (_chart != null)
                             {
-                                await _chart.UpdateSeriesAsync(false);
+                                await _chart.UpdateSeriesAsync();
                             }
 
                             StateHasChanged();
@@ -220,6 +231,7 @@
                 catch (Exception ex)
                 {
                     _errorMessage = $"Błąd danych live: {ex.Message}";
+                    StateHasChanged();
                 }
             }
         });
@@ -232,5 +244,4 @@
         _isDisposed = true;
         if (_hubConnection is not null) await _hubConnection.DisposeAsync();
     }
-
 }

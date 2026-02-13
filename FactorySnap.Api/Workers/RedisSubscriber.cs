@@ -13,24 +13,28 @@ public class RedisSubscriber(
     protected override async Task ExecuteAsync(CancellationToken cancellationToken)
     {
         var subscriber = redis.GetSubscriber();
-        
-        var queue = await subscriber.SubscribeAsync(RedisChannel.Literal("live/*"));
+        var channel = RedisChannel.Pattern("live/*");
 
-        queue.OnMessage(async channelMessage => 
+        await subscriber.SubscribeAsync(channel, (redisChannel, redisValue) =>
         {
-            try 
-            {
-                var json = channelMessage.Message;
-                var topic = channelMessage.Channel;
-
-                await hubContext.Clients.All.SendAsync("ReceiveMeasure", topic, json, cancellationToken: cancellationToken);
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Błąd przekazywania z Redis do SignalR");
-            }
+            _ = PushToSignalR(redisChannel, redisValue, cancellationToken);
         });
 
-        await Task.Delay(-1, cancellationToken);
+        await Task.Delay(Timeout.Infinite, cancellationToken);
+    }
+
+    private async Task PushToSignalR(RedisChannel redisChannel, RedisValue redisValue, CancellationToken ct)
+    {
+        try
+        {
+            var topic = redisChannel.ToString();
+            var json = redisValue.ToString();
+
+            await hubContext.Clients.All.SendAsync("ReceiveMeasure", topic, json, cancellationToken: ct);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Błąd podczas przesyłania danych z Redis do SignalR");
+        }
     }
 }
