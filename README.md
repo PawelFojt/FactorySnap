@@ -1,6 +1,6 @@
 # FactorySnap
 
-**FactorySnap** to aplikacja do monitorowania danych przemysłowych w czasie rzeczywistym.  
+**FactorySnap** to prosta aplikacja napisana na potrzeby studiów do monitorowania danych przemysłowych w czasie rzeczywistym.  
 System łączy się z serwerem **OPC UA**, subskrybuje wskazane nody, zapisuje pomiary w bazie danych i prezentuje je na żywo w UI.
 
 ---
